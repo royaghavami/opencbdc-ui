@@ -1,4 +1,4 @@
-#!/bin/sh
+!/bin/sh
 while ! nc -z $DB_HOST 5432; do
     echo "Waiting for db...";
     sleep 1;

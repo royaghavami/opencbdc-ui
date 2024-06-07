@@ -139,54 +139,75 @@ const constructReconcileOutputsQuery = (outputsToUpdate) => {
 
 
 const constructUpdateSpentQuery = (inputsSpent, txid) => {
-    // If tx had multiple recipients, would need to maintain an order of spentByPubkey so the output is credited to the right recipient
-    const updateSpentTxs = `UPDATE outputs SET spend_txid='${txid}' WHERE output_id IN `;
-    const output_ids_spent = [];
-
-    let output_ids_spent_string = '(';
-    for(let i = 0; i < inputsSpent.length; i++) {
-        let outputid = inputsSpent[i].output_id;
-        if (i == (inputsSpent.length - 1)) {
-            output_ids_spent_string += `'${outputid}'` + `);`
-        } 
-        else {
-            output_ids_spent_string += `'${outputid}'` + ','
-        }
-        output_ids_spent.push(inputsSpent[i].outputid);
+    // If there are no inputsSpent, return an empty string
+    if (inputsSpent.length === 0) {
+        return '';
     }
 
+    // Construct the initial part of the query
+    const updateSpentTxs = `UPDATE outputs SET spend_txid='${txid}' WHERE output_id IN `;
 
-    const updateSpentQuery = updateSpentTxs + output_ids_spent_string;
+    // Construct the list of output_ids
+    const output_ids_spent = inputsSpent.map(input => `'${input.output_id}'`).join(', ');
+
+    // Combine to form the complete query
+    const updateSpentQuery = updateSpentTxs + `(${output_ids_spent});`;
 
     return updateSpentQuery;
 };
 
+
 const getTransactions = (request, response) => {
     const pubkey = request.params.pubkey;
 
-    pool.query(`WITH txs AS (
-        SELECT o.created_txid, o.created_timestamp, prv.owner_pubkey from_pubkey, o.amount, o.owner_pubkey to_pubkey
-        FROM outputs o
-          LEFT JOIN outputs prv ON prv.spend_txid = o.created_txid
-        WHERE o.owner_pubkey = $1
-          AND prv.owner_pubkey != $1
-        UNION ALL
-        SELECT o.spend_txid, nxt.created_timestamp, o.owner_pubkey from_pubkey, nxt.amount, nxt.owner_pubkey to_pubkey
-        FROM outputs o
-          LEFT JOIN outputs nxt ON o.spend_txid = nxt.created_txid
-        WHERE o.spend_txid IS NOT NULL
-          AND o.owner_pubkey != nxt.owner_pubkey
-          AND o.owner_pubkey = $1
+    const query = `
+        WITH txs AS (
+            SELECT
+                o.created_txid AS txid,
+                o.created_timestamp,
+                prv.owner_pubkey AS from_pubkey,
+                o.amount,
+                o.owner_pubkey AS to_pubkey
+            FROM
+                outputs o
+                LEFT JOIN outputs prv ON prv.spend_txid = o.created_txid
+            WHERE
+                o.owner_pubkey = $1
+
+            UNION
+
+            SELECT
+                o.spend_txid AS txid,
+                o.created_timestamp,
+                o.owner_pubkey AS from_pubkey,
+                nxt.amount,
+                nxt.owner_pubkey AS to_pubkey
+            FROM
+                outputs o
+                LEFT JOIN outputs nxt ON o.spend_txid = nxt.created_txid
+            WHERE
+                o.owner_pubkey = $1
         )
-      SELECT *
-      FROM txs
-      ORDER BY created_timestamp ASC;`, [pubkey], (error, results) => {
+        SELECT
+            txid,
+            MIN(created_timestamp) AS created_timestamp,
+            from_pubkey,
+            amount,
+            to_pubkey
+        FROM txs
+        GROUP BY txid, from_pubkey, amount, to_pubkey
+        ORDER BY created_timestamp ASC;
+    `;
+
+    pool.query(query, [pubkey], (error, results) => {
         if (error) {
             throw error;
         }
+        console.log('results inside getTransaction: ', results);
         response.status(200).json(results.rows);
     });
 };
+
 
 const getAllOutputsForPublickey = (request, response) => {
     const pubkey = request.params.pubkey;
@@ -389,7 +410,7 @@ const getBalance = (request, response) => {
       }); 
 }
 
-const fundAddress = (request, response) => {
+const fundAddress = async (request, response) => {
     
     const recipientPubkey = request.body.recipientPubkey;
     const value = request.body.value;
@@ -416,7 +437,7 @@ const fundAddress = (request, response) => {
 
             const unspentOutputsQuery = `SELECT * FROM outputs WHERE owner_pubkey='${reservePubkey}' AND spend_txid IS NULL;`
             
-            client.query(unspentOutputsQuery, [], (err, results) => {
+            client.query(unspentOutputsQuery, [], async (err, results) => {
 
                 if (err) {
                     throw err;
@@ -433,7 +454,7 @@ const fundAddress = (request, response) => {
                 
                 try {
                     // Note: can set paramaters to port to 5555 and host to '127.0.0.1' if trying to connect to sentinel
-                    const data = Networking.broadcastTx(config.sentinel.port, config.sentinel.host, txInfo.signedTx);
+                    const data = await Networking.broadcast('5557', '127.0.0.1', txInfo.signedTx);
                     console.log("Data from sentinel: ", data);
                 } catch(error) {
                     console.log("Error in sending tx: ", error);
@@ -482,12 +503,12 @@ const sendTx = (request, response) => {
             return !!err;
         }
 
-        client.query('BEGIN', (err) => {
+        client.query('BEGIN', async (err) => {
             if (shouldAbort(err)) return;
 
             try {
-                const data = Networking.broadcastTx(config.sentinel.port, config.sentinel.host, signedTx);
-                console.log("Data from sentinel: ", data);
+                const data = await Networking.broadcast(config.sentinel.port, config.sentinel.host, signedTx);
+                console.log("Data from sentinel after send: ", data);
             } catch(error) {
                 console.log("Error in sending Tx: ", error);
                 shouldAbort(err);
@@ -532,7 +553,55 @@ const mintTx = (request, response) => {
     });            
 }
 
+const signUp = (request, response) => {
+    const { username, publicKey } = request.body;
+    pool.query('SELECT * FROM users WHERE username = $1', [username], (error, results) => {
+        if (error) {
+            console.error('Error during sign up:', error);
+            response.status(500).send('Error during sign up');
+            return;
+        }
+        if (results.rows.length > 0) {
+            response.status(409).send('Username already exists');
+            return;
+        }
+        pool.query('INSERT INTO users (username, public_key) VALUES ($1, $2) RETURNING *', [username, publicKey], (insertError, insertResults) => {
+            if (insertError) {
+                console.error('Error during sign up:', insertError);
+                response.status(500).send('Error during sign up');
+                return;
+            }
+            response.status(201).json(insertResults.rows[0]);
+        });
+    });
+};
+
+const signIn = (request, response) => {
+    const { username, publicKey } = request.body;
+    pool.query('SELECT * FROM users WHERE username = $1', [username], (error, results) => {
+        if (error) {
+            console.error('Error during login:', error);
+            response.status(500).send('Error during login');
+            return;
+        }
+        if (results.rows.length === 0) {
+            response.status(404).send('User not found');
+            return;
+        }
+        const user = results.rows[0];
+        if (user.public_key === publicKey) {
+            response.status(200).json(user);
+        } else {
+            response.status(401).send('Invalid credentials');
+        }
+    });
+};
+
+
+
 module.exports = {
+    signUp,
+    signIn,
     getTransactions,
     getAllOutputsForPublickey,
     syncOutputs,

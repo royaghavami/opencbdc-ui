@@ -137,6 +137,7 @@ export default {
         EventBus.$emit('sendTx', [this.form.recipientAddress, this.form.sendAmount]);
         this.showDismissibleAlert = true;
         this.dismissCountDown = this.dismissSecs;
+        console.log('after emit')
         setTimeout(1500, () => {
            this.resetForm();
         });

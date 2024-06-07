@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@enumatech/secp256k1-js": "git+https://github.com/project-hamilton/secp256k1-js.git",
+    "@mit-dci/opencbdc": "0.0.2",
     "assert": "^2.0.0",
     "axios": "^0.26.1",
     "bootstrap": "~4.5.0",
@@ -19,14 +20,15 @@
     "core-js": "^3.6.5",
     "cors": "^2.8.5",
     "express-session": "^1.17.3",
-    "@mit-dci/opencbdc": "0.0.2",
     "qrcode.vue": "~1.7.0",
     "vue": "^2.6.14",
     "vue-clipboard3": "^1.0.1",
     "vue-qrcode-reader": "^3.0.3",
+    "vue-router": "^3.6.5",
     "vuelidate": "^0.7.6"
   },
   "devDependencies": {
+    "@types/pg-format": "^1.0.5",
     "@vue/cli-plugin-babel": "~4.5.0",
     "@vue/cli-plugin-eslint": "~4.5.0",
     "@vue/cli-service": "~4.5.0",
