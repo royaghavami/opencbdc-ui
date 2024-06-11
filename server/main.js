@@ -23,6 +23,8 @@ app.get('/', function(req, res) {
 
 app.post('/api/v1/signUp', db.signUp)
 app.post('/api/v1/signIn', db.signIn)
+app.post('/api/v1/forgotPassword', db.getSecurityQuestion)
+app.post('/api/v1/verify', db.verifySecurityAnswer)
 app.get('/api/v1/outputs/:pubkey', db.getOutputsForPublickey);
 app.get('/api/v1/outputs/:pubkey/all', db.getAllOutputsForPublickey);
 app.get('/api/v1/txs/:pubkey', db.getTransactions);

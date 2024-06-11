@@ -3,8 +3,11 @@ const Output = opencbdc.Output;
 const Transaction = opencbdc.Transaction;
 const Input = opencbdc.Input;
 const Networking = opencbdc.Comms;
+const PublicKey = opencbdc.Publickey;
 // const Utils = opencbdc.Utils; See comments below
 const reserveConfig = require('./serverConfig.json');
+const Secp256k1 = require('@enumatech/secp256k1-js');
+const CryptoJS = require('crypto-js');
 const config = require('./config');
 const format = require('pg-format');
 
@@ -19,8 +22,21 @@ const pool = new Pool({
 });
 
 const { v4: uuidv4 } = require('uuid');
+const { req } = require('vuelidate/lib/validators/common');
 const sha256 = function a(b){function c(a,b){return a>>>b|a<<32-b}for(var d,e,f=Math.pow,g=f(2,32),h="length",i="",j=[],k=8*b[h],l=a.h=a.h||[],m=a.k=a.k||[],n=m[h],o={},p=2;64>n;p++)if(!o[p]){for(d=0;313>d;d+=p)o[d]=p;l[n]=f(p,.5)*g|0,m[n++]=f(p,1/3)*g|0}for(b+="\x80";b[h]%64-56;)b+="\x00";for(d=0;d<b[h];d++){if(e=b.charCodeAt(d),e>>8)return;j[d>>2]|=e<<(3-d)%4*8}for(j[j[h]]=k/g|0,j[j[h]]=k,e=0;e<j[h];){var q=j.slice(e,e+=16),r=l;for(l=l.slice(0,8),d=0;64>d;d++){var s=q[d-15],t=q[d-2],u=l[0],v=l[4],w=l[7]+(c(v,6)^c(v,11)^c(v,25))+(v&l[5]^~v&l[6])+m[d]+(q[d]=16>d?q[d]:q[d-16]+(c(s,7)^c(s,18)^s>>>3)+q[d-7]+(c(t,17)^c(t,19)^t>>>10)|0),x=(c(u,2)^c(u,13)^c(u,22))+(u&l[1]^u&l[2]^l[1]&l[2]);l=[w+x|0].concat(l),l[4]=l[4]+w|0}for(d=0;8>d;d++)l[d]=l[d]+r[d]|0}for(d=0;8>d;d++)for(e=3;e+1;e--){var y=l[d]>>8*e&255;i+=(16>y?0:"")+y.toString(16)}
 return i};
+
+const derive = (passphrase, username, salt, numKeys) => {
+    const hashedUsername = CryptoJS.SHA256(username + salt).toString();
+    const hashedPassphrase = CryptoJS.SHA256(passphrase + salt).toString();
+
+    let keys = [];
+    for (let x = 0; x < numKeys; x++) {
+        const sec = Secp256k1.uint256(CryptoJS.SHA256(hashedPassphrase + hashedUsername + x.toString()).toString(), 16);
+        keys.push(sec.toString('hex').length === 63 ? '0' + sec.toString('hex') : sec.toString('hex'));
+    }
+    return keys;
+}
 
 const constructTx = (inputs, recipientPubkey, value, secretKey, senderPubkey) => {
 
@@ -554,10 +570,10 @@ const mintTx = (request, response) => {
 }
 
 const signUp = (request, response) => {
-    const { username, publicKey } = request.body;
+    const { username, salt, publicKey, securityQuestion, securityAnswer } = request.body;
+    console.log('sign up body: ', request.body)
     pool.query('SELECT * FROM users WHERE username = $1', [username], (error, results) => {
         if (error) {
-            console.error('Error during sign up:', error);
             response.status(500).send('Error during sign up');
             return;
         }
@@ -565,19 +581,23 @@ const signUp = (request, response) => {
             response.status(409).send('Username already exists');
             return;
         }
-        pool.query('INSERT INTO users (username, public_key) VALUES ($1, $2) RETURNING *', [username, publicKey], (insertError, insertResults) => {
-            if (insertError) {
-                console.error('Error during sign up:', insertError);
-                response.status(500).send('Error during sign up');
-                return;
+        pool.query(
+            'INSERT INTO users (username, salt, public_key, security_question, security_answer) VALUES ($1, $2, $3, $4, $5) RETURNING *', 
+            [username, salt, publicKey, securityQuestion, securityAnswer], 
+            (insertError, insertResults) => {
+                if (insertError) {
+                    response.status(500).send('Error during sign up');
+                    return;
+                }
+                response.status(201).json(insertResults.rows[0]);
             }
-            response.status(201).json(insertResults.rows[0]);
-        });
+        );
     });
 };
 
+
 const signIn = (request, response) => {
-    const { username, publicKey } = request.body;
+    const { username, password } = request.body;
     pool.query('SELECT * FROM users WHERE username = $1', [username], (error, results) => {
         if (error) {
             console.error('Error during login:', error);
@@ -589,10 +609,53 @@ const signIn = (request, response) => {
             return;
         }
         const user = results.rows[0];
-        if (user.public_key === publicKey) {
+        const salt = user.salt;
+        let keys = derive(password, username, salt, 10);
+        let secKey = keys[0];
+        let derivedPublicKey = new PublicKey(secKey).publicKey;
+        if (user.public_key === derivedPublicKey) {
             response.status(200).json(user);
         } else {
             response.status(401).send('Invalid credentials');
+        }
+    });
+};
+
+const getSecurityQuestion = (request, response) => {
+    const { username } = request.body;
+    pool.query('SELECT security_question FROM users WHERE username = $1', [username], (error, results) => {
+        if (error) {
+            console.error('Error retrieving security question:', error);
+            response.status(500).send('Error retrieving security question');
+            return;
+        }
+        if (results.rows.length === 0) {
+            response.status(404).send('User not found');
+            return;
+        }
+        const securityQuestion = results.rows[0].security_question;
+        response.status(200).json({ securityQuestion });
+    });
+};
+
+const verifySecurityAnswer = (request, response) => {
+    const { username, answer } = request.body;
+    pool.query('SELECT security_answer FROM users WHERE username = $1', [username], (error, results) => {
+        if (error) {
+            console.error('Error verifying security answer:', error);
+            response.status(500).send('Error verifying security answer');
+            return;
+        }
+        if (results.rows.length === 0) {
+            response.status(404).send('User not found');
+            return;
+        }
+        const storedSecurityAnswer = results.rows[0].security_answer;
+        console.log(results.rows[0])
+        if (storedSecurityAnswer === answer) {
+            response.status(200).json({ success: true });
+        } else {
+            response.status(401).json({ success: false });
         }
     });
 };
@@ -602,6 +665,8 @@ const signIn = (request, response) => {
 module.exports = {
     signUp,
     signIn,
+    getSecurityQuestion,
+    verifySecurityAnswer,
     getTransactions,
     getAllOutputsForPublickey,
     syncOutputs,

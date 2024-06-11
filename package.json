@@ -19,6 +19,7 @@
     "browserify": "^17.0.0",
     "core-js": "^3.6.5",
     "cors": "^2.8.5",
+    "crypto-js": "^4.2.0",
     "express-session": "^1.17.3",
     "qrcode.vue": "~1.7.0",
     "vue": "^2.6.14",

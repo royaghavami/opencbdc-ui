@@ -3,16 +3,10 @@
     <div :class="alertClass" role="alert" v-if="showAlert">
         {{ alertMessage }}
       </div>
+
+     <Intro v-show="showIntro" :securityQuestion="securityQuestion" :canVerify="canVerify" /> 
   
-    <div v-show="showCreateWalletView">
-      <CreateWallet />
-    </div>
-
-    <div v-show="showSignInWalletView">
-      <SignInWallet />
-    </div>
-
-    <div class="center fade-in" v-show="!showCreateWalletView && !showSignInWalletView">
+    <div class="center fade-in" v-show="!showIntro">
       <div class="balance-card">
         <div class="first-half">
           ${{
@@ -83,11 +77,12 @@
 </template>
 
 <script>
-import CreateWallet from "./CreateWallet.vue";
-import SignInWallet from "./SignIn.vue";
 import Receive from "./Receive.vue";
 import Send from "./Send.vue";
 import TransactionList from "./TransactionList.vue";
+import Intro from "./Intro.vue";
+const CryptoJS = require('crypto-js');
+
 const Pubkey = window.cbdc.Publickey;
 const Input = window.cbdc.Input;
 const Output = window.cbdc.Output;
@@ -104,7 +99,7 @@ const axiosCaller = axios.create({
 });
 
 export default {
-  components: { Send, SignInWallet, CreateWallet, Receive, TransactionList },
+  components: { Send, Receive, TransactionList, Intro },
   name: "Dashboard",
   props: {},
   data: function () {
@@ -113,9 +108,11 @@ export default {
       baseUrl: process.env.BASE_URL,
       port: process.env.PORT,
       showSignInWalletView: false,
-      showCreateWalletView: true,
       showSendComponent: true,
       showReceiveComponent: false,
+      showIntro: true,
+      securityQuestion: null,
+      canVerify: false,
       showTransactionListComponent: false,
       fundEnabled: true,
       secretKeys: [],
@@ -257,14 +254,6 @@ export default {
         this.showAlert = false;
       }, 3000);
     },
-    showSignIn: function () {
-      this.showCreateWalletView = false
-      this.showSignInWalletView = true
-    },
-    showSignUp: function () {
-      this.showCreateWalletView = true
-      this.showSignInWalletView = false
-    },
     setupWallet: function (data) {
       localStorage.setItem("completedSetup", true);
       this.secretKeys = data.keys;
@@ -279,8 +268,10 @@ export default {
     },
     signUp: function (data) {
       this.setupWallet(data);
+      console.log('public key: ', this.pubkey)
       axiosCaller
-        .post("/signUp/", { username: this.username, publicKey: this.pubkey})
+        .post("/signUp/", { username: this.username, publicKey: this.pubkey, salt: data.salt, securityQuestion: data.securityQuestion, 
+          securityAnswer: data.securityAnswer})
         .then((res) => {
           if (res.status === 201) {
             axiosCaller
@@ -298,7 +289,7 @@ export default {
                 console.error("Error fetching balance:", error);
               });
             
-            this.showCreateWalletView = false;
+            this.showIntro = false;
             this.showAlertMessage('success', 'Sign up successful')
           } else {
             this.showAlertMessage('error', 'invalid username or password');
@@ -309,10 +300,10 @@ export default {
         });
     },
     signIn: function (data) {
-      this.setupWallet(data);
-      axiosCaller.post("/signIn/", { username: data.username, publicKey: this.pubkey })
+      
+      axiosCaller.post("/signIn/", { username: data.username, password: data.password })
         .then(response => {
-          console.log('sign in successful:', response.data);
+          console.log('sign in response:', response)
           axiosCaller
               .get("/balance/" + this.pubkey, { pubkey: this.pubkey })
               .then((res) => {
@@ -328,11 +319,32 @@ export default {
                 console.error("Error fetching balance:", error);
               });
             
-            this.showSignInWalletView = false;
+            this.showIntro = false;
             this.showAlertMessage('success', 'sign in successful')
         })
         .catch(error => {
           this.showAlertMessage('error', 'Error during sign in, try again', error);
+        });
+    },
+    forgotPassword: function (data) {
+      axiosCaller.post("/forgotPassword/", { username: data.username })
+        .then(response => {
+          this.securityQuestion = response.data.securityQuestion;
+        })
+        .catch(error => {
+          console.error('Error retrieving security question:', error);
+        });
+    },
+    verifySecurityAnswer: function (data) {
+      console.log('security in dashboard: ', data)
+      let encryptedAns = CryptoJS.SHA256(data.answer).toString()
+      axiosCaller.post("/verify/", { username: data.username, answer: encryptedAns })
+        .then(response => {
+          console.log(response)
+          this.canVerify = true;
+        })
+        .catch(error => {
+          console.error('Error retrieving security question:', error);
         });
     },
     formTx: function () {},
@@ -497,10 +509,11 @@ export default {
   },
   // lifecycle hooks
   created: function () {
-    // this.$root.$on("scrollspy::activate", this.onActivate);
     EventBus.$on("showSignUp", this.showSignUp);
     EventBus.$on("showSignIn", this.showSignIn);
     EventBus.$on("signInWallet", this.signIn);
+    EventBus.$on("forgotPasswordWallet", this.forgotPassword);
+    EventBus.$on("verifySecurityAnswer", this.verifySecurityAnswer);
     EventBus.$on("unlockWallet", this.signUp);
     EventBus.$on("sendTx", this.confirmTx);
   },
