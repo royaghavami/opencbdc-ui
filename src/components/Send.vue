@@ -78,7 +78,7 @@ import { validationMixin } from "vuelidate";
 import { required, minLength } from "vuelidate/lib/validators";
 
 const numberFormatValidator = (amount) => {
-  const regex = /\d+\.\d\d(?!\d)/;
+  const regex = /\d+\.\d{2}$/;
   return regex.test(amount);
 }
 
