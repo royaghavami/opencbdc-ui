@@ -59,5 +59,3 @@ services:
       - "5432:5432"
     networks:
       - cbdc-wallet
-        #volumes:
-        #  - ./server/init.sql:/docker-entrypoint-initdb.d/init.sql

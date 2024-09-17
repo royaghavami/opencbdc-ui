@@ -3,18 +3,19 @@
 </template>
 
 <script>
-import Home from './components/Home.vue'
+import Home from "./components/Home.vue";
 
 export default {
-  name: 'App',
+  name: "App",
   components: {
-    Home
-  }
-}
+    Home,
+  },
+};
 </script>
 
 <style>
-body, html {
+body,
+html {
   width: 100%;
   height: 100%;
   padding: 0px;

@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const _ = require('lodash');
 const http = require('http');
-const PORT = process.env.PORT || 3000;
+const port = process.env.PORT || 3002;
 const app = express();
 
 app.use(express.urlencoded({extended: false}));
@@ -12,7 +12,7 @@ app.use(express.json());
 app.use(cors());
 
 
-app.set(PORT);
+app.set(port);
 
 app.get('/', function(req, res) {
     res.json({
@@ -21,6 +21,11 @@ app.get('/', function(req, res) {
     });
 });
 
+app.post('/api/v1/signUp', db.signUp)
+app.post('/api/v1/signIn', db.signIn)
+app.post('/api/v1/importToken', db.importToken)
+app.post('/api/v1/forgotPassword', db.getSecurityQuestion)
+app.post('/api/v1/verify', db.verifySecurityAnswer)
 app.get('/api/v1/outputs/:pubkey', db.getOutputsForPublickey);
 app.get('/api/v1/outputs/:pubkey/all', db.getAllOutputsForPublickey);
 app.get('/api/v1/txs/:pubkey', db.getTransactions);
@@ -65,10 +70,10 @@ app.post('/api/v1/outputs/sync/', db.syncOutputs);
   const bind = typeof addr === 'string'
     ? `pipe ${addr}`
     : `port ${addr.port}`;
-  console.log(`Listening on ${bind}`);
+  console.log(`Listening on lkjhkgj ${bind}`);
 }
 
 let server = http.createServer(app);
-server.listen(PORT);
+server.listen(port);
 server.on('listening', onListening);
 server.on('error', onError);
