@@ -26,7 +26,8 @@
     "vue-clipboard3": "^1.0.1",
     "vue-qrcode-reader": "^3.0.3",
     "vue-router": "^3.6.5",
-    "vuelidate": "^0.7.6"
+    "vuelidate": "^0.7.6",
+    "vuex": "^3.6.2"
   },
   "devDependencies": {
     "@types/pg-format": "^1.0.5",

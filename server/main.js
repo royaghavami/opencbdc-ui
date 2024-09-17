@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const _ = require('lodash');
 const http = require('http');
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3002;
 const app = express();
 
 app.use(express.urlencoded({extended: false}));
@@ -23,6 +23,7 @@ app.get('/', function(req, res) {
 
 app.post('/api/v1/signUp', db.signUp)
 app.post('/api/v1/signIn', db.signIn)
+app.post('/api/v1/importToken', db.importToken)
 app.post('/api/v1/forgotPassword', db.getSecurityQuestion)
 app.post('/api/v1/verify', db.verifySecurityAnswer)
 app.get('/api/v1/outputs/:pubkey', db.getOutputsForPublickey);

@@ -1,27 +1,19 @@
 <template>
   <div>
     <div :class="alertClass" role="alert" v-if="showAlert">
-        {{ alertMessage }}
-      </div>
+      {{ alertMessage }}
+    </div>
 
-     <Intro v-show="showIntro" :securityQuestion="securityQuestion" :canVerify="canVerify" /> 
-  
+    <Stepper
+      v-show="showIntro"
+    />
+
     <div class="center fade-in" v-show="!showIntro">
       <div class="balance-card">
         <div class="first-half">
           ${{
             (balance / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
           }}
-        </div>
-        <div v-show="fundEnabled && balance === 0" class="second-half">
-          <button
-            type="light"
-            variant="info"
-            v-on:click="clickedFundWallet()"
-            class="btn"
-          >
-            Fund
-          </button>
         </div>
       </div>
 
@@ -30,11 +22,22 @@
         style="
           padding: 3px;
           min-width: 18rem;
-          max-width: 40rem;
+          max-width: 50rem;
           min-height: 30rem;
         "
       >
-        <b-tabs justified v-b-scrollspy:scrollspy-example card align="center">
+        <b-tabs justified card align="center">
+          <b-tab v-if="isAdmin">
+            <template #title>
+              Mint
+              <b-icon
+                class="no-icon"
+                font-scale="1"
+                icon="coin"
+              ></b-icon>
+            </template>
+            <Mint />
+          </b-tab>
           <b-tab active>
             <template #title>
               Send
@@ -44,6 +47,38 @@
                 icon="arrow-up-circle"
               ></b-icon>
             </template>
+            <b-card-body>
+              <div v-if="showSecretKey" class="p-20">
+                <label class="text-info"
+                  >This is master secret key.</label
+                >
+                <textarea
+                  v-model="secretKeys[0]"
+                  readonly
+                  class="form-control p-20"
+                  rows="2"
+                ></textarea>
+                <div class="qr-code">
+                  <qrcode-vue :value="secretKeys[0]" :size="100" level="H"></qrcode-vue>
+                </div>
+                </div
+            >
+            <label class="text-info"
+              >These are your secret key Shares. Each line is a secret key. 
+              </label
+            >
+            <textarea
+              readonly
+              class="form-control p-20"
+              rows="6"
+            >0:625021612a480c12d83588c0031833b00ff24c7b4680edbd947e10cce9244e7c
+            1:731ba1ffa2bdccd6b1d7a286e1ad3f2ab020aef4435e2625d12a0ec040395706
+            2:6747013c7dd20be0e4053e5cea8b9495cd29d8f7c2c49a249e951948ee2e061f
+            3:3ed23f17bb84c9316ebe5c421db333f1670dca85c4b449b9fcbf3066f3025bc7
+            4:6dab02e485738210853cd43e84c5f542d18a27a1492b90e4eba854194eb657ff
+            5:0bf5fdfc88633bedc10cf6420c80287f6523a844502db7a76b5084620149fac5
+          </textarea>
+          </b-card-body>
             <Send />
           </b-tab>
           <b-tab>
@@ -57,9 +92,18 @@
             </template>
             <Receive :address="addressToCopy" />
           </b-tab>
-          <b-tab
-            v-on:click="retrieveTxs()"
-          >
+          <b-tab>
+            <template #title>
+              Token
+              <b-icon
+                class="no-icon"
+                font-scale="1"
+                icon="cash-coin"
+              ></b-icon>
+            </template>
+            <ImportToken />
+          </b-tab>
+          <b-tab v-on:click="retrieveTxs()">
             <template #title>
               History
               <b-icon
@@ -79,10 +123,11 @@
 <script>
 import Receive from "./Receive.vue";
 import Send from "./Send.vue";
+import ImportToken from "./ImportToken.vue";
 import TransactionList from "./TransactionList.vue";
-import Intro from "./Intro.vue";
-const CryptoJS = require('crypto-js');
-
+import Mint from './Mint.vue'
+import Stepper from "./Stepper.vue";
+import QrcodeVue from 'qrcode.vue';
 const Pubkey = window.cbdc.Publickey;
 const Input = window.cbdc.Input;
 const Output = window.cbdc.Output;
@@ -92,14 +137,14 @@ const Address = window.cbdc.Address;
 import axios from "axios";
 import { EventBus } from "@/event-bus.js";
 const axiosCaller = axios.create({
-  baseURL: 'http://localhost:3000/api/v1', // uncomment this line (and comment out the next line) to run outside docker
+  baseURL: "http://localhost:3002/api/v1", // uncomment this line (and comment out the next line) to run outside docker
   // baseURL: process.env.VUE_APP_API_BASE_URL,
   timeout: 1000,
   headers: { "X-Custom-Header": "foobar" },
 });
 
 export default {
-  components: { Send, Receive, TransactionList, Intro },
+  components: { Send, Receive, TransactionList, Stepper, ImportToken, Mint, QrcodeVue },
   name: "Dashboard",
   props: {},
   data: function () {
@@ -107,11 +152,11 @@ export default {
       selectedTab: "Send",
       baseUrl: process.env.BASE_URL,
       port: process.env.PORT,
-      showSignInWalletView: false,
+      showSecretKey: false,
       showSendComponent: true,
       showReceiveComponent: false,
       showIntro: true,
-      securityQuestion: null,
+      isAdmin: false,
       canVerify: false,
       showTransactionListComponent: false,
       fundEnabled: true,
@@ -119,13 +164,12 @@ export default {
       balance: 0.0,
       address: "",
       pubkey: "",
-      username: '',
       txs: [],
       inputsToSearch: [],
       addressToCopy: "",
       showAlert: false,
-      alertType: '',
-      alertMessage: '',
+      alertType: "",
+      alertMessage: "",
     };
   },
   methods: {
@@ -257,7 +301,6 @@ export default {
     setupWallet: function (data) {
       localStorage.setItem("completedSetup", true);
       this.secretKeys = data.keys;
-      this.username = data.username;
       let secKey = this.secretKeys[0];
       let publicKey = new Pubkey(secKey);
       this.pubkey = publicKey.publicKey;
@@ -268,10 +311,10 @@ export default {
     },
     signUp: function (data) {
       this.setupWallet(data);
-      console.log('public key: ', this.pubkey)
       axiosCaller
-        .post("/signUp/", { username: this.username, publicKey: this.pubkey, salt: data.salt, securityQuestion: data.securityQuestion, 
-          securityAnswer: data.securityAnswer})
+        .post("/signUp/", {
+          publicKey: this.pubkey,
+        })
         .then((res) => {
           if (res.status === 201) {
             axiosCaller
@@ -282,75 +325,119 @@ export default {
                 for (let i = 0; i < unspent.length; i++) {
                   bal += unspent[i].amount;
                 }
-                console.log(unspent)
                 this.balance = bal;
+                this.showSecretKey = true;
               })
               .catch((error) => {
                 console.error("Error fetching balance:", error);
               });
-            
+
             this.showIntro = false;
-            this.showAlertMessage('success', 'Sign up successful')
+            this.showAlertMessage("success", "Wallet Created");
           } else {
-            this.showAlertMessage('error', 'invalid username or password');
+            this.showAlertMessage("error", "Error During Wallet Creation");
           }
         })
         .catch((error) => {
-          this.showAlertMessage('error', 'Error during sign up, try again', error);
+          this.showAlertMessage(
+            "error",
+            "Error during sign up, try again",
+            error
+          );
         });
     },
     signIn: function (data) {
-      
-      axiosCaller.post("/signIn/", { username: data.username, password: data.password })
-        .then(response => {
-          console.log('sign in response:', response)
+      let secKey = data.secretKey;
+      let publicKey = new Pubkey(secKey);
+      this.pubkey = publicKey.publicKey;
+      this.addressToCopy = new Address("00", publicKey.publicKey).address;
+      this.address = new Address("00", publicKey.publicKey);
+      localStorage.setItem("pubkey", this.pubkey);
+      localStorage.setItem("secKey", secKey);
+
+      axiosCaller
+        .post("/signIn/", { publicKey: this.pubkey })
+        .then((response) => {
+          this.pubkey = response.data.public_key;
+          this.isAdmin = response.data.role === 'admin' ? true : false
+          this.addressToCopy = new Address(
+            "00",
+            response.data.public_key
+          ).address;
+          this.address = new Address("00", response.data.public_key);
           axiosCaller
-              .get("/balance/" + this.pubkey, { pubkey: this.pubkey })
-              .then((res) => {
-                const unspent = res.data;
-                let bal = 0;
-                for (let i = 0; i < unspent.length; i++) {
-                  bal += unspent[i].amount;
-                }
-                console.log(unspent)
-                this.balance = bal;
-              })
-              .catch((error) => {
-                console.error("Error fetching balance:", error);
-              });
-            
-            this.showIntro = false;
-            this.showAlertMessage('success', 'sign in successful')
+            .get("/balance/" + this.pubkey, { pubkey: this.pubkey })
+            .then((res) => {
+              const unspent = res.data;
+              let bal = 0;
+              for (let i = 0; i < unspent.length; i++) {
+                bal += unspent[i].amount;
+              }
+              this.balance = bal;
+            })
+            .catch((error) => {
+              console.error("Error fetching balance:", error);
+            });
+
+          this.showIntro = false;
+          this.showAlertMessage("success", "sign in successful");
         })
-        .catch(error => {
-          this.showAlertMessage('error', 'Error during sign in, try again', error);
+        .catch((error) => {
+          this.showAlertMessage(
+            "error",
+            "Error during sign in, try again",
+            error
+          );
         });
     },
-    forgotPassword: function (data) {
-      axiosCaller.post("/forgotPassword/", { username: data.username })
-        .then(response => {
-          this.securityQuestion = response.data.securityQuestion;
+    mint: function (data) {
+      axiosCaller
+        .post("/mintTx/", { publicKey: this.pubkey, value: data.value })
+        .then(() => {
+          axiosCaller
+            .get("/balance/" + this.pubkey, { pubkey: this.pubkey })
+            .then((res) => {
+              const unspent = res.data;
+              let bal = 0;
+              for (let i = 0; i < unspent.length; i++) {
+                bal += unspent[i].amount;
+              }
+              this.balance = bal;
+            })
+            .catch((error) => {
+              console.error("Error fetching balance:", error);
+            });
         })
-        .catch(error => {
-          console.error('Error retrieving security question:', error);
-        });
     },
-    verifySecurityAnswer: function (data) {
-      console.log('security in dashboard: ', data)
-      let encryptedAns = CryptoJS.SHA256(data.answer).toString()
-      axiosCaller.post("/verify/", { username: data.username, answer: encryptedAns })
-        .then(response => {
-          console.log(response)
-          this.canVerify = true;
+    importToken: function (data) {
+      axiosCaller
+        .post("/importToken/", {
+          publicKey: this.pubkey,
+          transactionHex: data.transactionHex,
         })
-        .catch(error => {
-          console.error('Error retrieving security question:', error);
+        .then((response) => {
+          this.showAlertMessage("error", 'error', response);
+          axiosCaller
+            .get("/balance/" + this.pubkey, { pubkey: this.pubkey })
+            .then((res) => {
+              const unspent = res.data;
+              let bal = 0;
+              for (let i = 0; i < unspent.length; i++) {
+                bal += unspent[i].amount;
+              }
+              this.balance = bal;
+            })
+            .catch((error) => {
+              this.showAlertMessage("error", 'Error Fetching Balance', error);
+            });
+        }).catch((error) => {
+          this.showAlertMessage("error",  'Some Error Happend During Importing Tokens', error);
         });
     },
     formTx: function () {},
     retrieveTxs: function () {
       axiosCaller.get("/txs/" + this.pubkey).then((res) => {
-        console.log('Transaction list after click: ', res.data)
+        console.log("Transaction list after click: ", res.data);
         if (res.data === undefined) {
           this.txs = [];
         } else {
@@ -480,9 +567,9 @@ export default {
         this.retrieveTxs();
       }
     },
-    onActivate(target) {
-      console.log("Received Event: scrollspy::activate for target ", target);
-    },
+    // onActivate(target) {
+    //   console.log("Received Event: scrollspy::activate for target ", target);
+    // },
     // scrollInView($event) {
     //   let el;
     //   let href = $event.target.getAttribute("href");
@@ -499,11 +586,11 @@ export default {
   computed: {
     alertClass() {
       return {
-        'alert': true,
-        'alert-success': this.alertType === 'success',
-        'alert-danger': this.alertType === 'error',
-        'fade': true, // Add fade class for the fade effect
-        'show': this.showAlert, // Add show class to make the alert visible
+        alert: true,
+        "alert-success": this.alertType === "success",
+        "alert-danger": this.alertType === "error",
+        fade: true, // Add fade class for the fade effect
+        show: this.showAlert, // Add show class to make the alert visible
       };
     },
   },
@@ -512,10 +599,10 @@ export default {
     EventBus.$on("showSignUp", this.showSignUp);
     EventBus.$on("showSignIn", this.showSignIn);
     EventBus.$on("signInWallet", this.signIn);
-    EventBus.$on("forgotPasswordWallet", this.forgotPassword);
-    EventBus.$on("verifySecurityAnswer", this.verifySecurityAnswer);
+    EventBus.$on("importToken", this.importToken);
     EventBus.$on("unlockWallet", this.signUp);
     EventBus.$on("sendTx", this.confirmTx);
+    EventBus.$on("Mint", this.mint);
   },
   mounted: function () {},
   updated: function () {},
@@ -687,5 +774,11 @@ ul {
 
 .second-half:hover {
   opacity: 0.8;
+}
+
+.qr-code {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
 }
 </style>

@@ -2,7 +2,7 @@
   <div v-if="txns.length == 0" class="no-txs">
     <p> No Transactions. Please Fund Account. </p>
   </div> 
-  <div id="scrollspy-example" v-else>
+  <div v-else>
     <table id="firstTable">
       <tbody>
         <tr v-bind:key="row.id" v-for="row in txns">
